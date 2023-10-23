@@ -1,0 +1,1482 @@
+---
+title: "HIS project - Analysis of death by suicide"
+author: "Youssef El fadi - 727582"
+output:
+  html_notebook: default
+  html_document:
+    df_print: paged
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+In this report, I will analyze multiple datasets related to three key concepts: **deaths by suicide, mental health disorders among the population, and life expectancy.** Each concept is supported by various datasets, providing valuable insights into different aspects of these phenomena. The ultimate objective is to identify potential relationships and correlations among the data collected within each concept's respective datasets.
+
+
+# Library used
+
+```{r library, ECHO=FALSE}
+suppressPackageStartupMessages({
+  library(reshape2)
+  library(tidyverse)
+  library(data.table)
+  library(gridExtra)
+  library(maps)
+})
+```
+
+# Import and cleaning of datasets
+
+## Suicide - datasets
+
+#### Suicide: total deaths per year
+
+The datasets about **suicide** are taken from the site <https://www.gapminder.org/data/>. Let's try to take a look at the dataset "suicide_total_deaths":
+
+```{r import suicide_deaths}
+suicide_deaths <- read.csv("./datasets/suicide/suicide_total_deaths.csv", stringsAsFactors = F)
+head(suicide_deaths)
+names(suicide_deaths)
+```
+
+In the dataset, the rows represent different countries, while the columns represent different years. Each data point represents the number of deaths by suicide registered in a specific year for a particular country.
+
+Furthermore, it seems that when using the **read.csv(...)** function, the letter "X" was added to the column names. To address this issue, we can re-import the CSV file, this time specifying the attribute **check.names=FALSE** to prevent the addition of "X" to the column names.
+
+
+```{r read-csv}
+suicide_deaths <- read.csv("./datasets/suicide/suicide_total_deaths.csv", stringsAsFactors = F, check.names=FALSE)
+head(suicide_deaths)
+```
+
+Given the fact that we have only numbers in the dataset, except for the column *country*, let's check if the data type used is *numeric* for the column 1990. We can verify this by examining the class of the values in the 1990 column using the *class()* function in R.
+
+
+```{r check classe}
+class(suicide_deaths$"1990")
+```
+
+The datatype recognized for the data is **character**, this can be caused by NA value or by the presence of characters within the data. In fact it can be caused by the notation used: for example number can be expressed in scientific notation (which is handled and interpreted correctly by R) or for example it can be used the characters **"k,K"** for expressing **thousands**, or **"m,M"** for expressing **millions** and so on. The last case needs to be taken care of. <br><br> Let's see if the first column has any problem (NA value):
+
+```{r counting NA in 1990}
+na_1990 <- sum(is.na(suicide_deaths$"1990"))
+print(na_1990)
+```
+
+We can see that there are no NA values in this column, let's check if an explicit coercion to numeric gives us any error or warning:
+
+```{r counting NA after casting in numeric}
+coercion_1990 <- sum(is.na(as.numeric(suicide_deaths$"1990")))
+print(coercion_1990)
+```
+
+These tests confirm the presence of characters in 9 rows of the first column **1990**.<br>
+Note that the coercion in the numeric format of numbers expressed in scientific notation within a string does not give any errors, so we proceed to test the presence of **k, M,...** and we will substitute them respectively with **e3** and **e6**. Finally we convert the new value in numeric using **as.numeric(...)** and then check if the substitution+conversion gives any error or NA values.
+
+```{r correcting values with k,m}
+copy_suicide_deaths <- cbind(suicide_deaths)
+
+copy_suicide_deaths[, -1] <- lapply(copy_suicide_deaths[, -1], function(x) {
+  gsub("k", "e3", gsub("m", "e6", tolower(x)))
+})
+
+copy_suicide_deaths[, -1] <- lapply(copy_suicide_deaths[, -1], as.numeric)
+
+sum(is.na(copy_suicide_deaths$"1990"))
+
+```
+Another observation we can make is that some numbers in the dataset, which were displayed at the beginning, are in floating-point format rather than integers. This might seem peculiar considering that the dataset pertains to the number of deaths per year. However, it is important to note that the dataset provider explicitly states that the values represent the '*Total number of estimated deaths from self-inflicted injury*'.
+
+Given this information, we will proceed to convert the values to integers. Since rounding these estimated values does not significantly impact our analysis and introduces a maximum error of ±1, we can confidently round them to the nearest integer without compromising the overall validity of our findings.
+
+```{r echo=FALSE}
+copy_suicide_deaths[, -1] <- lapply(copy_suicide_deaths[, -1], function(x) as.integer(round(x)))
+
+suicide_deaths <- copy_suicide_deaths
+rm(copy_suicide_deaths)
+```
+
+#### Suicide: annual total number of deaths by age group
+
+I found another dataset which contains data about the death by suicide collected according some range of age. The dataset is taken from <https://ourworldindata.org/suicide>.
+
+```{r import suicide_deaths_by_age}
+suicide_deaths_by_age <- read.csv("./datasets/suicide/suicide_deaths_by_age.csv", stringsAsFactors = F)
+names(suicide_deaths_by_age)
+```
+
+Looking at the dataset and the column names, we can determine that we are not interested in the 'code' column, which represents the abbreviation of the country. Therefore, we will drop this column from our analysis. Additionally, we will rename the first column from 'Entity' to 'country' to better represent its content.
+
+Furthermore, we will modify the names of the last columns to have the following format: '*age_70*', '*age_50_69*', '*age_15_49*', and '*age_5_14*'.
+
+```{r change names of suicide_deaths_by_age}
+suicide_deaths_by_age <- subset(suicide_deaths_by_age, select = -c(2))
+
+names <- c("country", "year", "age_70", "age_50_69", "age_15_49", "age_5_14")
+
+colnames(suicide_deaths_by_age) <- names
+```
+
+```{r names(suicide_deaths_by_age)}
+names(suicide_deaths_by_age)
+```
+
+The result of these modifications are now showed:
+
+```{r suicide_deaths_by_age}
+head(suicide_deaths_by_age)
+```
+
+We can notice that from this dataset we can easily obtain the information about the total death per year which we had in the first separate dataset. So let's proceed with the creation of a new column that we will call **total_death** and the value will be the sum of each row. The new dataset will be displayed.
+
+```{r new column total death}
+suicide_deaths_by_age <- suicide_deaths_by_age %>%
+  mutate(total_death = select(., age_70:age_5_14) %>%
+  apply(1, sum, na.rm=TRUE))
+
+suicide_deaths <- suicide_deaths_by_age
+rm(suicide_deaths_by_age)
+head(suicide_deaths)
+```
+
+```{r counting NA values in suicide by age}
+na_values_suicide_by_age <- sum(is.na(suicide_deaths))
+na_values_suicide_by_age
+```
+
+There are no NA values present in the dataset.
+
+#### Suicide: male to female ratio of suicide rates
+
+This dataset is also taken from <https://ourworldindata.org/suicide>.
+
+```{r import male to female ratio dataset}
+suicide_male2female <- read.csv("./datasets/suicide/Male-Female-Ratio-of-Suicide-Rates.csv", stringsAsFactors = F)
+head(suicide_male2female)
+```
+
+In these datasets, we will drop the column Code and rename *Entity* to *Country*, as well as rename *Male.female.suicide.ratio* to *Male_to_female_ratio*.
+
+Upon examining the dataset, we can observe that the data is provided for the years 1990-2017, whereas the previous dataset had data available from 1990-2019.
+
+It is important to note that the dataset does not include information about the population breakdown by gender for each country. To facilitate comparisons and to analyze the growth of the male-to-female ratio, we will import another dataset from <https://ourworldindata.org/world-population-growth>.
+
+```{r change names of suicide_male2female, include = FALSE}
+suicide_male2female <- subset(suicide_male2female, select = -c(2))
+
+names <- c("country", "year", "male_to_female_ratio")
+
+colnames(suicide_male2female) <- names
+```
+
+
+```{r import population_dataset}
+population_dataset <- read.csv("./datasets/population/population-male.csv", stringsAsFactors = F)
+names(population_dataset)
+```
+
+```{r change names of population_dataset}
+population_dataset <- subset(population_dataset, select = c("Country.name", "Year", "Male.population"))
+
+names <- c("country", "year", "male_population")
+
+colnames(population_dataset) <- names
+```
+
+```{r counting NA values in male to female dataset}
+na_values_male2female <- sum(is.na(suicide_male2female))
+na_values_male_population <- sum(is.na(population_dataset))
+
+na_values_male2female
+na_values_male_population
+```
+There are no NA values present in both of the datasets.
+
+The next step will be to join these two datasets, and then the resulting dataset will be joined with the previous one containing the data regarding deaths by suicide.
+
+To perform the join, we will use the **inner_join(...)** function, with the join made on the columns *country* and *year*. Subsequently, we will assess how many data points are lost due to non-matching between the two datasets.
+
+```{r join population_dataset with suicide_male2female}
+suicide_male2female <- inner_join(x = suicide_male2female, y = population_dataset, by=c("country", "year"))
+```
+
+```{r join suicide_deaths with suicide_male2female}
+old_nrows_suicide_deaths = nrow(suicide_deaths)
+suicide_deaths <- inner_join(x = suicide_deaths, y = suicide_male2female, by=c("country", "year"))
+```
+
+```{r percentage data lost after join suicide_deaths}
+percentage_data_lost <- (1-(nrow(suicide_deaths)/old_nrows_suicide_deaths))*100
+percentage_data_lost
+```
+
+We lost approximately **20.5%** due to the join. We still have **5432 observations** which correspond to approximately **194 countries** (for each country we have data for 28 years).
+
+The final dataset that we are going to use for the plots and for our analyses is:
+
+```{r display final dataset of suicide deaths}
+head(suicide_deaths)
+```
+
+## Mental health - datasets
+
+#### Mental health: population with anxiety by country
+
+In this section we are going to import a dataset downloaded from <https://ourworldindata.org/mental-health>. The dataset is about the total number of people for whom an anxiety disorder was registered.
+
+```{r import anxiety per country}
+anxiety_country <- read.csv("./datasets/mental health/number-with-anxiety-disorders-country.csv", stringsAsFactors = F)
+names(anxiety_country)
+```
+In this dataset, we will once again drop the column *Code*, rename *Entity* to *country*, and rename *Prevalence...Anxiety.disorders...Sex..Both...Age..All.Ages..Number* to *people_with_anxiety_disorders*.
+
+
+```{r change names of anxiety_country, include = FALSE}
+anxiety_country <- subset(anxiety_country, select = -c(2))
+
+names <- c("country", "year", "people_with_anxiety_disorders")
+
+colnames(anxiety_country) <- names
+```
+
+The data provided for each country spans from the year **1990** to **2019**. Let's check if there are any NA values:
+
+```{r counting NA values in anxiety_country}
+total_NA <- sum(is.na(anxiety_country))
+total_NA
+```
+
+There is no other cleaning needed for this dataset.
+
+#### Mental health: population with depression by country
+
+The last dataset concerning **mental health** is also imported from <https://ourworldindata.org/mental-health> and is about the total number of people with depression by country from the year **1990** to **2019**.
+
+```{r import depression per country}
+depression_country <- read.csv("./datasets/mental health/number-with-depression-by-country.csv", stringsAsFactors = F)
+names(depression_country)
+```
+
+Once again, we will drop the column *Code*, rename *Entity* to *country*, and rename *Prevalence...Depressive.disorders...Sex..Both...Age..All.Ages..Number* to *people_with_depression*.
+
+```{r change names of depression_country, include = FALSE}
+depression_country <- subset(depression_country, select = -c(2))
+
+names <- c("country", "year", "people_with_depression")
+
+colnames(depression_country) <- names
+```
+
+Finally we join the two datasets:
+
+```{r join anxiety_country with depression_country}
+old_nrows_anxiety_country = nrow(anxiety_country)
+anxiety_depression_country <- inner_join(x = anxiety_country, y = depression_country, by=c("country", "year"))
+```
+
+```{r percentage data lost after join anxiety_depression_country}
+percentage_data_lost <- (1-(nrow(anxiety_depression_country)/old_nrows_suicide_deaths))*100
+percentage_data_lost
+```
+
+We didn't lose any data!
+
+## Life expectancy - dataset
+
+The last dataset that we will need for our analyses is taken from <https://ourworldindata.org/life-expectancy> and it is about the life expectancy in every country for the last 72 years.
+
+```{r import life expectancy per country}
+life_expectancy <- read.csv("./datasets/life expectancy/life-expectancy.csv", stringsAsFactors = F)
+head(life_expectancy)
+```
+
+We are going to drop the column *Code*, change *Entity* to *country* and *Life.expectancy.at.birth..historical.* to *life_expectancy*.
+
+```{r change names of life_expectancy, include = FALSE}
+life_expectancy <- subset(life_expectancy, select = -c(2))
+
+names <- c("country", "year", "life_expectancy")
+
+colnames(life_expectancy) <- names
+```
+
+We will also check for any NA values in the dataset.
+
+```{r counting NA values in life_expectancy}
+total_NA <- sum(is.na(life_expectancy))
+total_NA
+```
+
+## Complete dataset
+Given the nature of our analysis, which involves examining data distributed across countries and years, it will be crucial to have information about the total population for each country. This information will enable us to make meaningful comparisons and draw relevant conclusions. <br>
+
+The dataset is taken from <https://ourworldindata.org/world-population-growth>.
+
+```{r import dataset population}
+population <- read.csv("./datasets/population/population-and-demography.csv", stringsAsFactors = F)
+names(population)
+```
+We will keep only *Country*, *Year* and *Population*.
+
+```{r ECHO=FALSE}
+population <- population %>%
+    select(Country.name, Year, Population)
+names <- c("country", "year", "population")
+colnames(population) <- names
+```
+
+Finally we merge all the datasets:
+
+```{r Joina all dataset}
+list_df = list(suicide_deaths,anxiety_depression_country,life_expectancy, population)
+complete_dataset <- list_df %>%
+  reduce(inner_join, by=c("country", "year"))
+
+head(complete_dataset)
+```
+
+Since we already have data on the total population and male population for each country, we can easily calculate and add a new column containing the *female population*.
+
+
+```{r add female population, include=FALSE}
+
+complete_dataset <- complete_dataset %>%
+  mutate(female_population = population - male_population)
+
+```
+
+
+**NOTE**: in our dataset there is already the data about the "World" with all the attributes for each year from *1990 to 2017*.
+
+```{r removing from the environment variables not used, include=FALSE}
+rm(depression_country)
+rm(anxiety_country)
+rm(anxiety_depression_country)
+rm(life_expectancy)
+rm(population)
+rm(suicide_deaths)
+rm(suicide_male2female)
+rm(suicide_mental_health_dataset)
+```
+
+
+# Analyses
+
+```{r include=FALSE}
+complete_dataset <- complete_dataset %>%
+  mutate(ratio_death_over_population = total_death / population) %>%
+  mutate(ratio_anxiety_over_population = people_with_anxiety_disorders/population) %>%
+  mutate(ratio_depression_over_population = people_with_depression/population)
+```
+
+```{r include=FALSE}
+data_World <- subset(complete_dataset, country == "World") %>%
+   select(-c("country"))
+```
+
+## Analysis by age ranges over the years 1990-2017
+We start our analysis by looking at how the total deaths by suicide are distributed by age range over the years.
+
+```{r create plots death over years by age ranges, include=FALSE}
+total_death <- ggplot(data_World, aes(x = year, y = total_death)) +
+  geom_line(color="purple") +
+  labs(x = "Year", y = "Deaths", title = "Total deaths by suicide") +
+  scale_x_continuous(breaks = c(1990, 1995, 2000, 2005, 2010, 2014, 2017))
+
+total_death_over_70 <- ggplot(data_World, aes(x = year, y = age_70)) +
+  geom_line(color="blue") +
+  labs(x = "Year", y = "Deaths", title = "Total deaths by suicide\nage>70") +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(breaks = c(1990, 1995, 2000, 2005, 2010, 2014, 2017))
+
+total_death_50_69 <- ggplot(data_World, aes(x = year, y = age_50_69)) +
+  geom_line(color="green") +
+  labs(x = "Year", y = "Deaths", title = "Total deaths by suicide\nage 50-69") +
+  scale_x_continuous(breaks = c(1990, 1995, 2000, 2005, 2010, 2017))
+
+total_death_15_49 <- ggplot(data_World, aes(x = year, y = age_15_49)) +
+  geom_line(color="red") +
+  labs(x = "Year", y = "Deaths", title = "Total deaths by suicide\nage 15-49") +
+  scale_x_continuous(breaks = c(1990, 1995, 2000, 2005, 2010, 2017))
+
+total_death_5_14 <- ggplot(data_World, aes(x = year, y = age_5_14)) +
+  geom_line(color="orange") +
+  labs(x = "Year", y = "Deaths", title = "Total deaths by suicide\nage 5-14") +
+  scale_x_continuous(breaks = c(1990, 1995, 2000, 2005, 2010, 2017))
+```
+
+```{r show grid plot death over years by age ranges}
+grid.arrange(total_death, total_death_over_70, total_death_50_69, total_death_15_49, total_death_5_14, ncol = 2)
+```
+
+From this plot, we can observe that the number of deaths by suicide has been consistently decreasing since **2005**. Additionally, it is interesting to note that the number of deaths has been steadily increasing since **1990** for individuals aged **over 50**. However, for individuals between the ages of **5 and 49**, the number of deaths has been decreasing since **2000**.
+
+Now, let's combine all the plots together to get a comprehensive view of the data.
+
+```{r plot combined total deaths over years by age ranges, include=FALSE}
+deaths_over_years <- data_World %>%
+  select(
+    "year",
+    "age_70",
+    "age_50_69",
+    "age_15_49",
+    "age_5_14",
+    "total_death"
+  ) %>% 
+  pivot_longer(
+    cols = c(
+      "age_70",
+      "age_50_69",
+      "age_15_49",
+      "age_5_14",
+      "total_death"
+    ),
+    names_to = "data",
+    values_to = "value",
+    values_drop_na = TRUE,
+  )
+plot_combined <- ggplot(deaths_over_years, aes(x = year, y = value, color = data)) +
+  geom_line() +
+  labs(x = "Years", y = "Total deaths", title = "Total deaths by suicide over the years 1990-2017") +
+  scale_color_discrete("Groups", breaks = c("total_death", "age_70", "age_50_69", "age_15_49","age_5_14")) +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(breaks = c(1990, 1995, 2000, 2005, 2010, 2014, 2017))
+```
+
+```{r show plot combined total deaths over years by age ranges}
+print(plot_combined)
+```
+
+Based on this plot, we can already observe that the majority of deaths occurred among individuals aged **15-49**.
+
+To gain a better understanding of the relative contribution of each age range to the total deaths, we will calculate the sum of deaths for each age range from 1990 to 2017. We will then calculate the ratios of these sums to the total deaths that occurred during the same period. Finally, we will create a bar chart using the **geom_bar(...)** function to visualize these ratios.
+
+```{r ratio of deaths according to total deaths by age ranges over the years, include=FALSE}
+data_World_no_year <- data_World %>%
+   select(-"year")
+total_deaths_over_years <- t(data.frame(sum_over_years=colSums(data_World_no_year)))
+
+ratio <- total_deaths_over_years[, 1:4] / total_deaths_over_years[, 5]
+
+result <- data.frame(columns = c("Over 70", "50-69", "15-49", "5-14"),
+                        ratio = ratio,
+                        color = c("blue", "green","red", "orange"))
+result$columns <- factor(result$columns, levels = c("Over 70", "50-69", "15-49", "5-14"))
+
+plot_ratio <- ggplot(result, aes(x = columns, y = ratio, fill = color)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Age ranges", y = "Ratio %", title = "Ratio of deaths according to total deaths occured from\n1990 to 2017 by age ranges") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none") +
+  scale_fill_manual(breaks = c("blue", "green", "red", "orange"),
+                    values = c("blue", "green", "red", "orange"))
+
+```
+
+```{r show ratio of deaths according to total deaths by age ranges over the years}
+print(plot_ratio)
+```
+
+As expected from the previous plots, more than **60%** of the total deaths that occurred from 1990 to 2017 are attributed to the age range **15-49**. On the other hand, less than 3% of the total deaths fall within the age range **5-14**.
+
+It would be interesting to have a more specific breakdown of age groups within the 15-49 range, such as distinguishing between young individuals (under ~30 years old) and adults (between ~30 and 49 years old). However, unfortunately, we do not have this more detailed breakdown available in our dataset.
+
+Additionally, we can use a **box plot** to visualize how the values of total deaths by suicide per year are distributed across the different age ranges.
+
+```{r boxplot death_suicide_by_age, include=FALSE}
+test <- pivot_longer(data_World, cols = c("age_5_14", "age_15_49", "age_50_69", "age_70"), names_to = "age_group", values_to = "deaths")
+dataset_long_5_14 <- pivot_longer(data_World, cols = c("age_5_14"), names_to = "age_group", values_to = "deaths")
+dataset_long_15_49 <- pivot_longer(data_World, cols = c("age_15_49"), names_to = "age_group", values_to = "deaths")
+dataset_long_50_69 <- pivot_longer(data_World, cols = c("age_50_69"), names_to = "age_group", values_to = "deaths")
+dataset_long_70 <- pivot_longer(data_World, cols = c("age_70"), names_to = "age_group", values_to = "deaths")
+
+boxplot_5_14 <- ggplot(dataset_long_5_14, aes(x = age_group, y = deaths, fill = age_group)) +
+  stat_boxplot(geom ='errorbar') +
+  geom_boxplot() +
+  scale_fill_manual(values=c("orange")) +
+  geom_jitter(color="black", size=0.4, alpha=0.9) +
+  xlab("Age range") +
+  ylab("Deahts by suicide") +
+  ggtitle("Distribution of deaths by age ranges") +
+  theme_minimal()
+boxplot_15_49 <- ggplot(dataset_long_15_49, aes(x = age_group, y = deaths, fill = age_group)) +
+  stat_boxplot(geom ='errorbar') +
+  geom_boxplot() + 
+  scale_fill_manual(values=c("red")) +
+  geom_jitter(color="black", size=0.4, alpha=0.9) +
+  xlab("Age range") +
+  ylab("Deahts by suicide") +
+  ggtitle("Distribution of deaths by age") +
+  theme_minimal()
+boxplot_50_69 <- ggplot(dataset_long_50_69, aes(x = age_group, y = deaths, fill = age_group)) +
+  stat_boxplot(geom ='errorbar') +
+  geom_boxplot() + 
+  scale_fill_manual(values=c("green")) +
+  geom_jitter(color="black", size=0.4, alpha=0.9) +
+  xlab("Age range") +
+  ylab("Deahts by suicide") +
+  theme_minimal()
+boxplot_70 <- ggplot(dataset_long_70, aes(x = age_group, y = deaths, fill = age_group)) +
+  stat_boxplot(geom ='errorbar') +
+  geom_boxplot() + 
+  scale_fill_manual(values=c("blue")) +
+  geom_jitter(color="black", size=0.4, alpha=0.9) +
+  xlab("Age range") +
+  ylab("Deahts by suicide") +
+  scale_y_continuous(labels = scales::comma) +
+  theme_minimal()
+
+```
+
+```{r show boxplot death_suicide_by_age}
+grid.arrange(boxplot_5_14, boxplot_15_49, boxplot_50_69, boxplot_70, ncol = 2)
+```
+
+```{r plot ratio death over population World, include=FALSE}
+
+plot_combined <- ggplot(data_World, aes(x = year, y = ratio_death_over_population*100)) +
+  geom_line() +
+  geom_point() +
+  labs(x = "Years", y = "% deaths over population", title = "Ratio % deaths by suicide over population: World") +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(breaks = c(1990, 1995, 2000, 2005, 2010, 2014, 2017))
+```
+
+```{r show plot ratio over population World}
+print(plot_combined)
+```
+
+From the first plot, we observed that the total number of deaths by suicide in recent years has returned to a level similar to that of 1990. However, when we examine the last plot, we can see that the ratio of deaths by suicide to the world population has been steadily decreasing since 1995.
+
+In the next section, we will plot the ratios of total deaths by suicide for specific age ranges relative to the total deaths by suicide for each country in the years 1990 and 2017 on a map.
+
+```{r include=FALSE}
+
+copy_complete_dataset <- complete_dataset
+copy_complete_dataset <- copy_complete_dataset %>%
+  mutate(ratio_age_5_14_over_deaths = (age_5_14 / total_death) *100) %>%
+  mutate(ratio_age_15_49_over_deaths = (age_15_49 / total_death) *100) %>%
+  mutate(ratio_age_50_69_over_deaths = (age_50_69 / total_death) *100) %>%
+  mutate(ratio_age_70_over_deaths = (age_70 / total_death) *100)
+
+
+scala_colori <- scale_fill_continuous(limits = range(0:7.5),
+                                     low = "green", high = "red", breaks = c(0, 1, 3, 5, 7.5))
+
+colnames(copy_complete_dataset)[colnames(copy_complete_dataset) == "country"] = "region"
+world <- map_data("world")
+worldplot <- ggplot() +
+  geom_polygon(data = world, aes(x=long, y = lat, group = group)) + 
+  coord_fixed(1.3)
+
+worldTotal <- copy_complete_dataset %>%
+  mutate(region = recode(str_trim(region), "United States" = "USA",
+                            "United Kingdom" = "UK",
+                            "Democratic Republic of Congo" = "Democratic Republic of the Congo",
+                         "Congo"="Republic of Congo",
+                         "Cote d'Ivoire" = "Ivory Coast",
+                         "Czechia" = "Czech Republic"))
+
+worldSubset <- inner_join(world, subset(worldTotal, year == 1990), by = "region")
+
+plain <- theme(
+  axis.text = element_blank(),
+  axis.line = element_blank(),
+  axis.ticks = element_blank(),
+  panel.border = element_blank(),
+  panel.grid = element_blank(),
+  axis.title = element_blank(),
+  panel.background = element_rect(fill = "white"),
+  plot.title = element_text(hjust = 0.1)
+)
+
+world_ratio_5_14_to_total_1990 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) + 
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_age_5_14_over_deaths)) +
+  scala_colori + 
+  ggtitle("Ratio % deaths by suicide age 5 to 14 over total death by suicide of the country:\n1990") +
+  plain
+```
+
+
+```{r include=FALSE}
+worldSubset <- inner_join(world, subset(worldTotal, year == 2017), by = "region")
+
+world_ratio_5_14_to_total_2017 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) + 
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_age_5_14_over_deaths)) +
+  scala_colori + 
+  ggtitle("Ratio % deaths by suicide age 5 to 14 over total death by suicide of the country:\n2017") +
+  plain
+```
+
+```{r include=FALSE}
+scala_colori <- scale_fill_continuous(limits = range(copy_complete_dataset$ratio_age_15_49_over_deaths),
+                                     low = "green", high = "red")
+
+worldSubset <- inner_join(world, subset(worldTotal, year == 1990), by = "region")
+
+world_ratio_15_49_to_total_1990 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) +
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_age_15_49_over_deaths)) +
+  scala_colori + 
+  ggtitle("Ratio % deaths by suicide age 15 to 49 over total death by suicide of the country:\n1990") +
+  plain
+
+worldSubset <- inner_join(world, subset(worldTotal, year == 2017), by = "region")
+
+world_ratio_15_49_to_total_2017 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) +
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_age_15_49_over_deaths)) +
+  scala_colori + 
+  ggtitle("Ratio % deaths by suicide age 15 to 49 over total death by suicide of the country:\n2017") +
+  plain
+```
+
+```{r include=FALSE}
+scala_colori <- scale_fill_continuous(limits = range(copy_complete_dataset$ratio_age_50_69_over_deaths),
+                                     low = "green", high = "red")
+
+worldSubset <- inner_join(world, subset(worldTotal, year == 1990), by = "region")
+
+world_ratio_50_69_to_total_1990 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) +
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_age_50_69_over_deaths)) +
+  scala_colori + 
+  ggtitle("Ratio % deaths by suicide age 50 to 69 over total death by suicide of the country:\n1990") +
+  plain
+
+worldSubset <- inner_join(world, subset(worldTotal, year == 2017), by = "region")
+
+world_ratio_50_69_to_total_2017 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) +
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_age_50_69_over_deaths)) +
+  scala_colori + 
+  ggtitle("Ratio % deaths by suicide age 50 to 69 over total death by suicide of the country:\n2017") +
+  plain
+```
+
+```{r include=FALSE}
+scala_colori <- scale_fill_continuous(limits = range(copy_complete_dataset$ratio_age_70_over_deaths),
+                                     low = "green", high = "red")
+
+worldSubset <- inner_join(world, subset(worldTotal, year == 1990), by = "region")
+
+world_ratio__70_to_total_1990 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) +
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_age_70_over_deaths)) +
+  scala_colori + 
+  ggtitle("Ratio % deaths by suicide age > 70 over total death by suicide of the country:\n1990") +
+  plain
+
+worldSubset <- inner_join(world, subset(worldTotal, year == 2017), by = "region")
+
+world_ratio__70_to_total_2017 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) +
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_age_70_over_deaths)) +
+  scala_colori + 
+  ggtitle("Ratio % deaths by suicide age > 70 over total death by suicide of the country:\n2017") +
+  plain
+```
+
+```{r}
+grid.arrange(world_ratio_5_14_to_total_1990, world_ratio_5_14_to_total_2017, ncol = 1)
+
+grid.arrange(world_ratio_15_49_to_total_1990, world_ratio_15_49_to_total_2017, ncol = 1)
+
+grid.arrange(world_ratio_50_69_to_total_1990, world_ratio_50_69_to_total_2017, ncol = 1)
+
+grid.arrange(world_ratio__70_to_total_1990, world_ratio__70_to_total_2017, ncol = 1)
+```
+
+- **Age range between 5 and 14:** we can see that the ratio got lower for most of the countries, the         countries with the highest value are in Africa. We can notice that there are no countries with ratio equal to *100%*.<br>
+
+- **Age range between 15 and 49:** the deaths of individuals in the 15-49 age range are prevalent in every country, with only a few countries having a minimum ratio of around **30%**. Arab countries did not show significant differences between 1990 and 2017. Countries in central Europe, China, USA, and Canada experienced a notable decrease in the ratio.
+
+- **Age range between 50 and 69:** this time the Arab countries had a "better performance" compared to the rest of the World in terms of the ratio for this age range. However, central Europe, China, USA, Canada and Greenland had a notable increase (up to *20%*!).
+
+- **Age over 70:** most countries did not show significant changes in the ratios for this age range, except for central Europe and China, which experienced a notable increase in the ratio.
+
+In conclusion we can say that for the age range *15-49* and *50-69* the ratios are similar for most of the countries, while for the age range *5-14* and *over 70* the ratio is higher for few and specific countries.
+
+*******************************************************
+
+## Analysis of distribution of death by suicide over the World 
+
+Now we are going to analyse which are the countries where the ratio *total deaths / population of the world* is high, we will compare the situation in 1990 with 2017.
+
+```{r world_ratio_death_to_total_1990, include=FALSE}
+totaldeath_1990 <- data_World %>%
+  filter(year == 1990) %>%
+  pull(total_death)
+
+totaldeath_2017 <- data_World %>%
+  filter(year == 2017) %>%
+  pull(total_death)
+
+copy_complete_dataset <- complete_dataset
+copy_complete_dataset <- copy_complete_dataset %>%
+  mutate(ratio_death_to_world = ifelse(year == 1990, (total_death / totaldeath_1990)*100, ifelse(year == 2017, (total_death / totaldeath_2017)*100, NA)))
+
+scala_colori <- scale_fill_continuous(limits = range(0.1:30),
+                                      low = "green", high = "red", breaks = c(2, 5, 10, 15, 20, 23, 26, 29))
+
+colnames(copy_complete_dataset)[colnames(copy_complete_dataset) == "country"] = "region"
+world <- map_data("world")
+worldplot <- ggplot() +
+  geom_polygon(data = world, aes(x=long, y = lat, group = group)) + 
+  coord_fixed(1.3)
+
+worldTotal <- copy_complete_dataset %>%
+  mutate(region = recode(str_trim(region), "United States" = "USA",
+                            "United Kingdom" = "UK",
+                            "Democratic Republic of Congo" = "Democratic Republic of the Congo",
+                         "Congo"="Republic of Congo",
+                         "Cote d'Ivoire" = "Ivory Coast",
+                         "Czechia" = "Czech Republic"))
+
+worldSubset <- inner_join(world, subset(worldTotal, year == 1990), by = "region")
+
+plain <- theme(
+  axis.text = element_blank(),
+  axis.line = element_blank(),
+  axis.ticks = element_blank(),
+  panel.border = element_blank(),
+  panel.grid = element_blank(),
+  axis.title = element_blank(),
+  panel.background = element_rect(fill = "white"),
+  plot.title = element_text(hjust = 0.1)
+)
+
+world_ratio_death_to_total_1990 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) + 
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_death_to_world)) +
+  scala_colori + 
+  ggtitle("Ratio % deaths by suicide over\ndeath by suicide of the World: 1990") +
+  plain
+```
+
+
+```{r world_ratio_death_to_total_2017, include=FALSE}
+worldSubset <- inner_join(world, subset(worldTotal, year == 2017), by = "region")
+
+world_ratio_death_to_total_2017 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) + 
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_death_to_world)) +
+  scala_colori + 
+  ggtitle("Ratio % deaths by suicide in a country over\ndeath by suicide of the World: 2017") +
+  plain
+```
+
+```{r show grid of world_ratio_death_to_total_1990 and world_ratio_death_to_total_2017}
+grid.arrange(world_ratio_death_to_total_1990, world_ratio_death_to_total_2017, ncol = 1)
+```
+
+**Note:** the countries colored with grey have a ratio **<0.1%**.
+
+As expected, countries with high populations such as **USA, Russia, China, and India** tend to have higher ratios of deaths by suicide. A larger population size can contribute to higher absolute numbers of suicide deaths.
+
+It is interesting to note that while most countries did not experience significant changes in the ratio over the years, **India and China** show a different trend. This suggests that there may be specific factors or dynamics influencing suicide rates in these countries that deviate from the overall pattern.
+
+Furthermore, we can notice that for some central Africa countries they had an increase of the ratio from less than **0.1% to ~2%**!
+
+For the next plots, we will further investigate and provide a valid interpretation for the unexpected trend observed in India and China.
+
+```{r population and total death China-India, include=FALSE}
+china_india <- complete_dataset %>% filter(country == "China" | country == "India")
+
+plot_population_china_india <- ggplot(china_india, aes(x = year, y = population, color=country)) + 
+  geom_line() +
+  geom_point() +
+  labs(x = "Years", y = "Population", title = "Population: China-India") +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(breaks = seq(from = 1990, to = 2017, by = 3))
+
+plot_total_death_china_india <- ggplot(china_india, aes(x = year, y = total_death, color=country)) + 
+  geom_line() +
+  geom_point() +
+  labs(x = "Years", y = "Deaths", title = "Deaths by suicide: China-India") +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(breaks = seq(from = 1990, to = 2017, by = 3))
+
+plot_ratio_china_india <- ggplot(china_india, aes(x = year, y = ratio_death_over_population*100, color=country)) + 
+  geom_line() +
+  geom_point() +
+  labs(x = "Years", y = "Proportion %", title = "Death by suicide over population of country:\nChina - India") +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(breaks = seq(from = 1990, to = 2017, by = 3))
+
+plot_male_to_female_ratio_china_india <- ggplot(china_india, aes(x = year, y = male_to_female_ratio, color=country)) + 
+  geom_line() +
+  geom_point() +
+  labs(x = "Years", y = "Ratio", title = "Male to female ratio death by suicide:\nChina - India") +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(breaks = seq(from = 1990, to = 2017, by = 3))
+
+boxplot_china_india <- ggplot(china_india, aes(x = country, y = total_death, fill = country)) +
+  stat_boxplot(geom ='errorbar') +
+  geom_boxplot(outlier.shape = 16, outlier.colour = "red") +
+  geom_jitter(color="black", size=0.4, alpha=0.9) +
+  xlab("Country") +
+  ylab("Number of deaths") +
+  ggtitle("Distribution of deaths by suicide by country: China-India") +
+  theme_minimal()
+
+plot_male_population_china_india <- ggplot(china_india, aes(x = year, y = male_population, color=country)) + 
+  geom_line() +
+  geom_point() +
+  labs(x = "Years", y = "Male population", title = "Male population:\nChina - India") +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(breaks = seq(from = 1990, to = 2017, by = 3))
+
+plot_female_population_china_india <- ggplot(china_india, aes(x = year, y = female_population, color=country)) + 
+  geom_line() +
+  geom_point() +
+  labs(x = "Years", y = "Female population", title = "Female population:\nChina - India") +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(breaks = seq(from = 1990, to = 2017, by = 3))
+  
+```
+
+```{r show plot population and total death China-India}
+print(plot_population_china_india)
+print(plot_total_death_china_india)
+```
+
+From the plot, we can observe that the populations of **China and India** have been steadily increasing over the years. However, the trends in deaths by suicide differ between the two countries.
+
+From this plot we can see that the populations of China and India are constantly increasing, the deaths by suicide in India increased during **1990-2000** and has since remained relatively constant.
+In China, the number of deaths by suicide has been decreasing since **1995**, with a slight increase observed during **2002-2004**. Since **2014**, the number of deaths has remained relatively constant. This indicates a significant decline in suicide deaths over time in China, even though the population continues to grow.
+
+To gain a better understanding of the trends, it would be helpful to examine the ratio of total deaths to the population of each country. This can be achieved by calculating the **ratio (total deaths / population of the country) x 100**. Additionally, plotting a boxplot will allow us to visualize the distribution of these ratios and identify any variations or outliers.
+
+```{r}
+print(plot_ratio_china_india)
+print(boxplot_china_india)
+```
+
+As we expected from the previous plots, we can see that China had a more significant decrease compared to India.
+<br><br>
+It would be interesting to see how the **ratio of male to female** deaths by suicide changed over the years.<br>
+A value *>1* means that there were more deaths of male compared to female. <br>
+We also plot the trends of male population and female population over the years.
+
+
+```{r}
+print(plot_male_to_female_ratio_china_india)
+
+print(plot_male_population_china_india)
+print(plot_female_population_china_india)
+```
+
+In **India**, the **ratio of male to female** deaths by suicide has consistently been greater than 1, indicating a higher prevalence of suicide deaths among males. This pattern has remained relatively stable since **2008**, with only slight variations.
+
+In **China**, the **ratio of male to female** deaths by suicide has shown a different trend. Until **1997**, the ratio was generally below 1, indicating a higher prevalence of suicide deaths among females. However, since then, the ratio has steadily increased and crossed the threshold of 1, indicating a higher prevalence among males. This change suggests that China has experienced a *significant decrease in suicide deaths among females, despite the growing population for both males and females*.
+
+For both the countries, the male and female population *always* kept increasing.
+
+
+```{r world_ratio_death_to_country_1990, include=FALSE}
+scala_colori <- scale_fill_continuous(limits = range(complete_dataset$ratio_death_over_population*100),
+                                      low = "green", high = "red")
+
+colnames(complete_dataset)[colnames(complete_dataset) == "country"] = "region"
+world <- map_data("world")
+worldplot <- ggplot() +
+  geom_polygon(data = world, aes(x=long, y = lat, group = group)) + 
+  coord_fixed(1.3)
+
+worldTotal <- complete_dataset %>%
+  mutate(region = recode(str_trim(region), "United States" = "USA",
+                            "United Kingdom" = "UK",
+                            "Democratic Republic of Congo" = "Democratic Republic of the Congo",
+                         "Congo"="Republic of Congo",
+                         "Cote d'Ivoire" = "Ivory Coast",
+                         "Czechia" = "Czech Republic"))
+
+worldSubset <- inner_join(world, subset(worldTotal, year == 1990), by = "region")
+
+plain <- theme(
+  axis.text = element_blank(),
+  axis.line = element_blank(),
+  axis.ticks = element_blank(),
+  panel.border = element_blank(),
+  panel.grid = element_blank(),
+  axis.title = element_blank(),
+  panel.background = element_rect(fill = "white"),
+  plot.title = element_text(hjust = 0.1)
+)
+
+world_ratio_death_to_country_1990 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) + 
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_death_over_population*100)) +
+  scala_colori +
+  ggtitle("Ratio % of deaths by suicide over population of the country in 1990") +
+  plain
+```
+
+
+```{r world_ratio_death_to_country_2017, include=FALSE}
+
+worldSubset <- inner_join(world, subset(worldTotal, year == 2017), by = "region")
+
+world_ratio_death_to_country_2017 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) + 
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_death_over_population*100)) +
+  scala_colori +
+  ggtitle("Ratio % of deaths by suicide over population of the country in 2017") +
+  plain
+```
+
+<br>
+
+Now we are going to plot the ratio *(deaths by suicide / population of country) x 100* for every country of the World, we will compare the situation in 1990 with the one in 2017.
+
+```{r show grid of world_ratio_death_to_country_1990 and world_ratio_death_to_country_2017}
+grid.arrange(world_ratio_death_to_country_1990, world_ratio_death_to_country_2017, ncol = 1)
+```
+
+Indeed, the situation seems to be relatively stable for most countries in terms of the ratio deaths by suicide over the population of the country. However, **Greenland** (and China, but we already analyzed it) stands out as an exception, with a notable difference in the ratio compared to other countries. Greenland's unique characteristics, such as its small population size (less than *56 000*!) may contribute to this distinct pattern. 
+
+*******************************************************
+
+## Analysis of death by suicide: male to female ratio
+
+In this section we analyse the male to female ratio, its trend over time and the situation of every country.
+
+```{r male_to_female_ratio, include=FALSE}
+male_to_female_ratio <- ggplot(data_World, aes(x = year, y = male_to_female_ratio)) + 
+  geom_line() +
+  geom_point() +
+  labs(x = "Years", y = "Male to female ratio", title = "Male to female ratio: World") +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(breaks = seq(from = 1990, to = 2017, by = 3))
+```
+
+```{r plot gender population, include=FALSE}
+data_World <- data_World %>%
+  mutate(ratio_male_population = male_population / population) %>%
+  mutate(ratio_female_population = female_population / population)
+
+ratio_gender <- data_World %>%
+  select(
+    "year",
+    "ratio_male_population",
+    "ratio_female_population"
+  ) %>% 
+  pivot_longer(
+    cols = c(
+      "ratio_male_population",
+      "ratio_female_population"
+    ),
+    names_to = "data",
+    values_to = "value",
+    values_drop_na = TRUE,
+  )
+
+plot_bar <- ggplot(ratio_gender, aes(factor(year), fill = factor(data))) + 
+  geom_bar(position = "fill") + 
+  labs(x = "Year", y = "Proportion of gender population", fill = "data", title = "Ratio of male and female over the years") +
+  theme(axis.text.x = element_text(angle = 45)) +
+  geom_hline(yintercept = 0.5, linetype = 2)
+
+population_gender <- data_World %>%
+  select(
+    "year",
+    "male_population",
+    "female_population"
+  ) %>% 
+  pivot_longer(
+    cols = c(
+      "male_population",
+      "female_population"
+    ),
+    names_to = "data",
+    values_to = "value",
+    values_drop_na = TRUE,
+  )
+
+plot_population_gender <- ggplot(population_gender, aes(x = year, y = value, color = data)) +
+  geom_line() +
+  labs(x = "Years", y = "population", title = "Population and gender") +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(breaks = c(1990, 1995, 2000, 2005, 2010, 2014, 2017))
+
+```
+
+
+```{r show male_to_female_ratio}
+print(male_to_female_ratio)
+print(plot_bar)
+print(plot_population_gender)
+```
+
+From the first plot we can see that since **1990** the deaths by suicide are higher in the male population compared to female population, and the ratio kept constantly increasing. <br>
+<br>
+From the last two plots we see that the proportion of male population is slightly equal to female population, with a proportion equal to *~49%-51%* over the years. <br>
+<br>
+Now we plot the male to female ratio in all the countries in 1990 and 2017.
+
+```{r world_ratio_male_to_female_1990, include=FALSE}
+copy_complete_dataset <- complete_dataset
+
+scala_colori <- scale_fill_continuous(limits = range(copy_complete_dataset$male_to_female_ratio),
+                                      low = "green", high = "red")
+
+colnames(copy_complete_dataset)[colnames(copy_complete_dataset) == "country"] = "region"
+world <- map_data("world")
+worldplot <- ggplot() +
+  geom_polygon(data = world, aes(x=long, y = lat, group = group)) + 
+  coord_fixed(1.3)
+
+worldTotal <- copy_complete_dataset %>%
+  mutate(region = recode(str_trim(region), "United States" = "USA",
+                            "United Kingdom" = "UK",
+                            "Democratic Republic of Congo" = "Democratic Republic of the Congo",
+                         "Congo"="Republic of Congo",
+                         "Cote d'Ivoire" = "Ivory Coast",
+                         "Czechia" = "Czech Republic"))
+
+worldSubset <- inner_join(world, subset(worldTotal, year == 1990), by = "region")
+
+plain <- theme(
+  axis.text = element_blank(),
+  axis.line = element_blank(),
+  axis.ticks = element_blank(),
+  panel.border = element_blank(),
+  panel.grid = element_blank(),
+  axis.title = element_blank(),
+  panel.background = element_rect(fill = "white"),
+  plot.title = element_text(hjust = 0.1)
+)
+
+world_ratio_male_to_female_1990 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) + 
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = male_to_female_ratio)) +
+  scala_colori +
+  ggtitle("Ratio male to female death by suicide: World 1990") +
+  plain
+```
+
+```{r world_ratio_male_to_female_2017, include=FALSE}
+worldSubset <- inner_join(world, subset(worldTotal, year == 2017), by = "region")
+
+world_ratio_male_to_female_2017 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) + 
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = male_to_female_ratio)) +
+  scala_colori +
+  ggtitle("Ratio male to female death by suicide: World 2017") +
+  plain
+```
+
+```{r show grid of world_ratio_male_to_female_1990 and world_ratio_male_to_female_2017}
+grid.arrange(world_ratio_male_to_female_1990, world_ratio_male_to_female_2017, ncol = 1)
+```
+
+It is indeed interesting to note that the *ratio of male to female* deaths by suicide has either increased or remained unchanged for all the countries.
+There is no significant decrease!
+
+*******************************************************
+
+## Analysis of people with anxiety disorders and people with depression
+
+In this section, we will analyze the trends in the **population with anxiety disorders and depression disorders** over the years. We will plot the data to visualize any changes or patterns.
+
+```{r anxiety_and_depression, include=FALSE}
+anxiety_and_depression <- data_World %>%
+  select(
+    "year",
+    "people_with_anxiety_disorders",
+    "people_with_depression"
+  ) %>% 
+  pivot_longer(
+    cols = c(
+      "people_with_anxiety_disorders",
+      "people_with_depression"
+    ),
+    names_to = "data",
+    values_to = "value",
+    values_drop_na = TRUE,
+  )
+plot_combined <- ggplot(anxiety_and_depression, aes(x = year, y = value, color = data)) +
+  geom_line() +
+  labs(x = "Years", y = "Pppulation", title = "Population with anxiety disorders and with depression disorder:\nWorld") +
+  scale_color_discrete("Groups", breaks = c("people_with_anxiety_disorders", "people_with_depression")) +
+  scale_y_continuous(labels = scales::comma, breaks = c(170000000, 200000000, 250000000, 280000000)) +
+  scale_x_continuous(breaks = c(1990, 1995, 2000, 2005, 2010, 2014, 2017))
+```
+
+```{r show anxiety_and_depression}
+print(plot_combined)
+```
+
+From the plot we can see that there were always more people with anxiety disorders compared to people with depression. Both kept increasing over the years with the same trend. <br>
+<br>
+Let's see how the **ratio over the total population** changed over the year.
+
+
+```{r ratio_anxiety_and_depression, include=FALSE}
+ratio_anxiety_and_depression <- data_World %>%
+  select(
+    "year",
+    "ratio_anxiety_over_population",
+    "ratio_depression_over_population"
+  ) %>% 
+  pivot_longer(
+    cols = c(
+      "ratio_anxiety_over_population",
+      "ratio_depression_over_population"
+    ),
+    names_to = "data",
+    values_to = "value",
+    values_drop_na = TRUE,
+  )
+plot_combined <- ggplot(ratio_anxiety_and_depression, aes(x = year, y = value*100, color = data)) +
+  geom_line() +
+  labs(x = "Years", y = "% over population", title = "Ratio % of population with anxiety disorders and \npopulation with depression over total population: World") +
+  scale_color_discrete("Groups", breaks = c("ratio_anxiety_over_population", "ratio_depression_over_population")) +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(breaks = c(1990, 1995, 2000, 2005, 2010, 2014, 2017))
+```
+
+```{r show ratio_anxiety_and_depression}
+print(plot_combined)
+```
+
+With this plot we can see that even if the ratios over the total population kept increasing, both had some "drops" but not in the same years! <br>
+<br>
+Let's see now how are the **ratios in the countries** in 1990 and 2017.
+
+```{r world_ratio_depression_to_country_2017, include=FALSE}
+copy_complete_dataset <- complete_dataset
+
+colnames(copy_complete_dataset)[colnames(copy_complete_dataset) == "country"] = "region"
+world <- map_data("world")
+worldplot <- ggplot() +
+  geom_polygon(data = world, aes(x=long, y = lat, group = group)) + 
+  coord_fixed(1.3)
+
+worldTotal <- copy_complete_dataset %>%
+  mutate(region = recode(str_trim(region), "United States" = "USA",
+                            "United Kingdom" = "UK",
+                            "Democratic Republic of Congo" = "Democratic Republic of the Congo",
+                         "Congo"="Republic of Congo",
+                         "Cote d'Ivoire" = "Ivory Coast",
+                         "Czechia" = "Czech Republic"))
+
+worldSubset <- inner_join(world, subset(worldTotal, year == 2017), by = "region")
+
+plain <- theme(
+  axis.text = element_blank(),
+  axis.line = element_blank(),
+  axis.ticks = element_blank(),
+  panel.border = element_blank(),
+  panel.grid = element_blank(),
+  axis.title = element_blank(),
+  panel.background = element_rect(fill = "white"),
+  plot.title = element_text(hjust = 0.1)
+)
+
+world_ratio_depression_to_country_2017 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) + 
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_depression_over_population*100)) +
+  scala_colori +
+  ggtitle("Ratio % people with depression over population of the country:\nWorld 2017") +
+  plain
+```
+
+```{r world_ratio_depression_to_country_1990, include=FALSE}
+worldSubset <- inner_join(world, subset(worldTotal, year == 1990), by = "region")
+
+world_ratio_depression_to_country_1990 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) + 
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_depression_over_population*100)) +
+  scala_colori + 
+  ggtitle("Ratio % people with depression over population of the country:\nWorld 1990") +
+  plain
+```
+
+```{r world_ratio_anxiety_to_country_2017, include=FALSE}
+worldSubset <- inner_join(world, subset(worldTotal, year == 2017), by = "region")
+
+world_ratio_anxiety_to_country_2017 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) + 
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_anxiety_over_population*100)) +
+  scala_colori + 
+  ggtitle("Ratio % people with anxiety disorders over population of the country:\nWorld 2017") +
+  plain
+```
+
+```{r world_ratio_anxiety_to_country_1990, include=FALSE}
+worldSubset <- inner_join(world, subset(worldTotal, year == 1990), by = "region")
+
+world_ratio_anxiety_to_country_1990 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) + 
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_anxiety_over_population*100)) +
+  scala_colori +
+  ggtitle("Ratio % people with anxiety disorders over population of the country:\nWorld 1990") +
+  plain
+```
+
+```{r show grid of world_ratio_depression_to_country_2017 and world_ratio_anxiety_to_country_2017}
+grid.arrange(world_ratio_depression_to_country_1990, world_ratio_depression_to_country_2017, ncol = 1)
+
+grid.arrange(world_ratio_anxiety_to_country_1990, world_ratio_anxiety_to_country_2017, ncol = 1)
+```
+
+We observe that the prevalence of depression disorders remained relatively stable across countries, with no significant variations except for a worsening trend in **Eritrea**. Similarly, the prevalence of anxiety disorders showed little change overall, except for notable increases in **Brazil and Libya**.
+
+Now, let's examine the specific trends in **China and India** regarding anxiety and depression disorders.
+
+```{r ratio_anxiety_and_depression_china, include=FALSE}
+ratio_anxiety_and_depression_china <- china_india %>%
+  filter(country == "China") %>%
+  select(
+    "year",
+    "ratio_anxiety_over_population",
+    "ratio_depression_over_population",
+  ) %>% 
+  pivot_longer(
+    cols = c(
+      "ratio_anxiety_over_population",
+      "ratio_depression_over_population"
+    ),
+    names_to = "data",
+    values_to = "value",
+    values_drop_na = TRUE,
+  )
+plot_ratio_anxiety_and_depression_china <- ggplot(ratio_anxiety_and_depression_china, aes(x = year, y = value*100, color = data)) +
+  geom_line() +
+  labs(x = "Years", y = "% population", title = "Ratio % people with anxiety disorders over population of the country:\nChina") +
+  scale_color_discrete("Groups", breaks = c("ratio_anxiety_over_population", "ratio_depression_over_population")) +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(breaks = c(1990, 1995, 2000, 2005, 2010, 2014, 2017))
+```
+
+```{r ratio_anxiety_and_depression_india, include=FALSE}
+ratio_anxiety_and_depression_india <- china_india %>%
+  filter(country == "India") %>%
+  select(
+    "year",
+    "ratio_anxiety_over_population",
+    "ratio_depression_over_population",
+  ) %>% 
+  pivot_longer(
+    cols = c(
+      "ratio_anxiety_over_population",
+      "ratio_depression_over_population"
+    ),
+    names_to = "data",
+    values_to = "value",
+    values_drop_na = TRUE,
+  )
+plot_ratio_anxiety_and_depression_india <- ggplot(ratio_anxiety_and_depression_india, aes(x = year, y = value*100, color = data)) +
+  geom_line() +
+  labs(x = "Years", y = "% population", title = "Ratio % people with anxiety disorders over population of the country:\nIndia") +
+  scale_color_discrete("Groups", breaks = c("ratio_anxiety_over_population", "ratio_depression_over_population")) +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(breaks = c(1990, 1995, 2000, 2005, 2010, 2014, 2017))
+```
+
+```{r show grid of plot_ratio_anxiety_and_depression_china and plot_ratio_anxiety_and_depression_india}
+grid.arrange(plot_ratio_anxiety_and_depression_china, plot_ratio_anxiety_and_depression_india, ncol = 1)
+```
+
+We can observe that the trends in the two countries, China and India, are contrasting. In **China**, there has consistently been a higher prevalence of people with anxiety disorders, except for the recent years. On the other hand, in **India**, there has consistently been a higher prevalence of people with depression.
+
+Now, let's explore which countries contribute the most to the total number of people with anxiety and depression disorders. We will examine the data for the years 1990 and 2017.
+
+```{r world_ratio_anxiety_to_total_1990, include=FALSE}
+anxiety_disorders_World_1990 <- data_World %>%
+  filter(year == 1990) %>%
+  pull(people_with_anxiety_disorders)
+
+anxiety_disorders_World_2017 <- data_World %>%
+  filter(year == 2017) %>%
+  pull(people_with_anxiety_disorders)
+
+depression_World_1990 <- data_World %>%
+  filter(year == 1990) %>%
+  pull(people_with_depression)
+
+depression_World_2017 <- data_World %>%
+  filter(year == 2017) %>%
+  pull(people_with_depression)
+
+copy_complete_dataset <- complete_dataset
+copy_complete_dataset <- copy_complete_dataset %>%
+  
+  mutate(ratio_anxiety_to_world = ifelse(year == 1990, (people_with_anxiety_disorders / anxiety_disorders_World_1990)*100, ifelse(year == 2017, (people_with_anxiety_disorders / anxiety_disorders_World_2017)*100, NA))) %>%
+  
+  mutate(ratio_depression_to_world = ifelse(year == 1990, (people_with_depression / depression_World_1990)*100, ifelse(year == 2017, (people_with_depression / depression_World_2017)*100, NA)))
+
+scala_colori <- scale_fill_continuous(limits = range(1:22),
+                                      low = "green", high = "red", breaks = c(1, 5, 8, 13, 16, 19, 22))
+
+colnames(copy_complete_dataset)[colnames(copy_complete_dataset) == "country"] = "region"
+world <- map_data("world")
+worldplot <- ggplot() +
+  geom_polygon(data = world, aes(x=long, y = lat, group = group)) + 
+  coord_fixed(1.3)
+
+worldTotal <- copy_complete_dataset %>%
+  mutate(region = recode(str_trim(region), "United States" = "USA",
+                            "United Kingdom" = "UK",
+                            "Democratic Republic of Congo" = "Democratic Republic of the Congo",
+                         "Congo"="Republic of Congo",
+                         "Cote d'Ivoire" = "Ivory Coast",
+                         "Czechia" = "Czech Republic"))
+
+worldSubset <- inner_join(world, subset(worldTotal, year == 1990), by = "region")
+
+plain <- theme(
+  axis.text = element_blank(),
+  axis.line = element_blank(),
+  axis.ticks = element_blank(),
+  panel.border = element_blank(),
+  panel.grid = element_blank(),
+  axis.title = element_blank(),
+  panel.background = element_rect(fill = "white"),
+  plot.title = element_text(hjust = 0.1)
+)
+
+world_ratio_anxiety_to_total_1990 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) + 
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_anxiety_to_world)) +
+  scala_colori + 
+  ggtitle("Ratio % people with anxiety disorders in a country over\npeople with anxiety disorders of the World: 1990") +
+  plain
+
+world_ratio_depression_to_total_1990 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) + 
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_depression_to_world)) +
+  scala_colori + 
+  ggtitle("Ratio % people with depression in a country over\npeople with depression of the World: 1990") +
+  plain
+```
+
+
+```{r world_ratio_anxiety_to_total_2017, include=FALSE}
+worldSubset <- inner_join(world, subset(worldTotal, year == 2017), by = "region")
+
+world_ratio_anxiety_to_total_2017 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) + 
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_anxiety_to_world)) +
+  scala_colori + 
+  ggtitle("Ratio % people with anxiety disorders in a country over\npeople with anxiety disorders of the World: 2017") +
+  plain
+
+world_ratio_depression_to_total_2017 <- ggplot(data = worldSubset, mapping = aes(x = long, y = lat, group = group)) + 
+  coord_fixed(1.3) +
+  geom_polygon(aes(fill = ratio_depression_to_world)) +
+  scala_colori + 
+  ggtitle("Ratio % people with depression in a country over\npeople with depression of the World: 2017") +
+  plain
+```
+
+```{r show grid of world_ratio_anxiety_to_total_1990 and world_ratio_anxiety_to_total_2017}
+grid.arrange(world_ratio_depression_to_total_1990, world_ratio_depression_to_total_2017, ncol = 1)
+
+grid.arrange(world_ratio_anxiety_to_total_1990, world_ratio_anxiety_to_total_2017, ncol = 1)
+```
+
+**Note:** the countries colored with grey have a ratio **<1%**.<br><br>
+
+From the previous analysis, we can observe that the countries contributing the most to the total number of people with anxiety disorders and people with depression are the same. Specifically, **China and India** stand out with significant changes between **1990 and 2017**, being the only countries with notable differences.
+
+Additionally, we can see that there are fewer countries in **Africa** with a substantial number of countries contributing at least **1%** compared to other continents. This could be attributed to the lack of reporting by the population in those regions.
+
+Moving forward, we will compute the correlation coefficient to measure the strength of the linear relationship between the variables "**people with anxiety disorders**" and "**people with depression**" using aggregated data for the "World" from 1990 to 2017. Furthermore, we will create a **scatterplot** to visualize this relationship.
+
+```{r compute correlation between anxiety and depression, include=FALSE}
+correlation_data <- data.frame(
+  year = data_World$year,
+  anxiety = data_World$people_with_anxiety_disorders,
+  depression = data_World$people_with_depression
+)
+
+correlation <- cor(correlation_data$anxiety, correlation_data$depression)
+
+scatter_plot <- ggplot(correlation_data, aes(x = anxiety, y = depression)) +
+  geom_point() +
+  labs(x = "People with anxiety disorders", y = "People with depression",
+       title = "Correlation between people with anxiety disorders and people \nwith depression in the World from 1990 to 2017") +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_minimal()
+```
+
+```{r print plot e value of correlation}
+print(scatter_plot)
+
+print(paste("Correlation: ", correlation))
+```
+
+The value of the correlation is **~1**! This means that if the value of *people with anxiety disorders* increase, the value of *people with depression* will also increase. <br>
+We should remember that the correlation doesn't give any explicit information about *cause-effect* relation! It just gives the linear relationship between these two variables.
+
+********************************************************
+
+## Analysis of life expectancy
+
+Let's see how the life expectancy for the World changed over time.
+
+```{r life_expectancy_world, include=FALSE}
+life_expectancy_world <- data_World %>%
+  select(
+    "year",
+    "life_expectancy"
+  ) %>% 
+  pivot_longer(
+    cols = c(
+      "life_expectancy"
+    ),
+    names_to = "data",
+    values_to = "value",
+    values_drop_na = TRUE,
+  )
+plot_combined <- ggplot(life_expectancy_world, aes(x = year, y = value, color = data)) +
+  geom_line() +
+  labs(x = "Years", y = "Years of life", title = "Life expectancy: World") +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(breaks = c(1990, 1995, 2000, 2005, 2010, 2014, 2017))
+```
+
+```{r show life_expectancy_world}
+print(plot_combined)
+```
+
+As we see from the plot the life expectancy always kept increasing since 1990, starting from the value **64** (years old) to **72**.<br>
+<br> 
+For China and India the trend is shown in the next plot:
+
+```{r life expectancy China-India, include=FALSE}
+plot_life_expectancy_china_india <- ggplot(china_india, aes(x = year, y = life_expectancy, color=country)) + 
+  geom_line() +
+  geom_point() +
+  labs(x = "Years", y = "Years of life", title = "Life expectancy over the years: China-India") +
+  scale_y_continuous(labels = scales::comma) +
+  scale_x_continuous(breaks = seq(from = 1990, to = 2017, by = 3))
+```
+
+```{r show plot life expectancy China-India}
+print(plot_life_expectancy_china_india)
+```
+
+We can observe that **China** consistently had a higher life expectancy compared to **India** and the rest of the **World**!
+
+# Conclusions
+
+Through this analysis, we have discovered that total suicide deaths have returned to the levels of 1990, indicating a continuous decrease in the suicide rate relative to the total population. However, we have found that suicide deaths are decreasing among individuals under the age of 49, while they are increasing among those aged 50 and above. Nevertheless, deaths among individuals aged 15 to 49 still represent a significant portion of the total suicide deaths.
+
+Furthermore, we have observed a notable decline in suicide deaths in China since 1995, with a decrease of approximately 100,000 individuals. This decrease is primarily driven by a decline in female suicide deaths. <br>
+We conducted a comparison between China and India, two countries with large populations, and discovered contrasting trends over the years in terms of suicide deaths, prevalence of anxiety disorders, and depression.
+
+Additionally, we have found that globally, the population is roughly divided between males and females (approximately 49-51% each). Despite this gender balance, there are approximately twice as many male suicide deaths compared to female suicide deaths.
+
+If we consider the data collectively, for the entire world, we find a strong correlation between the number of people with anxiety disorders and the number of people with depression. <br>
+It is important to note that high rates of anxiety or depression among the population of a country do not necessarily correlate with high suicide rates, with the exceptions being Greenland and Russia.
+
